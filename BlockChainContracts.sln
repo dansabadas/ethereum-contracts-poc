@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.28307.168
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NethereumSample", "NethereumSample.csproj", "{34B3A746-1615-4D43-90A0-FEA4BBE97006}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NethereumSample", "NethereumSample\NethereumSample.csproj", "{34B3A746-1615-4D43-90A0-FEA4BBE97006}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BitcoinSample", "..\BitcoinSample\BitcoinSample.csproj", "{2C9FD684-8ECA-427F-9669-04CB2B8B8B13}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BitcoinSample", "BitcoinSample\BitcoinSample.csproj", "{2C9FD684-8ECA-427F-9669-04CB2B8B8B13}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
