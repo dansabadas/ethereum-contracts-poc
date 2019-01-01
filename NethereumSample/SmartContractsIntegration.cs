@@ -1,12 +1,6 @@
-﻿using Nethereum.Web3;
+﻿using System.Numerics;
 using Nethereum.ABI.FunctionEncoding.Attributes;
-using Nethereum.Contracts.CQS;
-using Nethereum.Util;
-using Nethereum.Web3.Accounts;
-using Nethereum.Hex.HexConvertors.Extensions;
 using Nethereum.Contracts;
-using Nethereum.Contracts.Extensions;
-using System.Numerics;
 
 namespace NethereumSample
 {
