@@ -33,8 +33,8 @@ namespace BitcoinSample
             Console.WriteLine($"mainNetPrivateKey={mainNetPrivateKey}"); 
             Console.WriteLine($"testNetPrivateKey={testNetPrivateKey}");
 
-            bool WifIsBitcoinSecret = mainNetPrivateKey == privateKey.GetWif(Network.Main);
-            Console.WriteLine($"WifIsBitcoinSecret={WifIsBitcoinSecret}");
+            bool wifIsBitcoinSecret = mainNetPrivateKey == privateKey.GetWif(Network.Main);
+            Console.WriteLine($"WifIsBitcoinSecret={wifIsBitcoinSecret}");
 
             BitcoinSecret bitcoinSecret = privateKey.GetWif(Network.Main);
             Key samePrivateKey = bitcoinSecret.PrivateKey;
@@ -81,15 +81,15 @@ namespace BitcoinSample
         private static async Task Transactions()
         {
             QBitNinjaClient client = new QBitNinjaClient(Network.Main);
-            // Parse transaction id to NBitcoin.uint256 so the client can eat it
+            // Parse trn id to NBitcoin.uint256 so the qbitNinjaClient can eat it
             var transactionId = uint256.Parse("f13dc48fb035bbf0a6e989a26b3ecb57b84f85e0836e777d6edf60d87a4a2d94");
-            
-            // Query the transaction
+
+            // Query the trn
             GetTransactionResponse transactionResponse = await client.GetTransaction(transactionId);
             Transaction transaction = transactionResponse.Transaction;
 
-            Console.WriteLine($"transactionResponse.TransactionId={transactionResponse.TransactionId}"); 
-            Console.WriteLine($"transaction.GetHash()={transaction.GetHash()}");
+            Console.WriteLine($"transactionResponse.TransactionId={transactionResponse.TransactionId}");
+            Console.WriteLine($"trn.GetHash()={transaction.GetHash()}");
 
             Console.WriteLine(transactionResponse.TransactionId == transactionId);
 
@@ -141,17 +141,22 @@ namespace BitcoinSample
             TxOut txOut = new TxOut(twentyOneBtc, scriptPubKey);
             Console.WriteLine(txOut.Value);
 
-            //OutPoint firstPreviousOutPoint = transaction.Inputs.First().PrevOut;
-            //var firstPreviousTransactionResponse = await client.GetTransaction(firstPreviousOutPoint.Hash);
-            //var firstPreviousTransaction = firstPreviousTransactionResponse.Transaction;
-            //var iteration = 0;
-            //Console.WriteLine($"{iteration}: total out={firstPreviousTransaction.TotalOut}, isCoinbase={firstPreviousTransaction.IsCoinBase}");
-            //while (!firstPreviousTransaction.IsCoinBase)
-            //{
-            //    firstPreviousTransactionResponse = await client.GetTransaction(firstPreviousTransaction.Inputs.First().PrevOut.Hash);
-            //    firstPreviousTransaction = firstPreviousTransactionResponse.Transaction;
-            //    Console.WriteLine($"{++iteration}: total out={firstPreviousTransaction.TotalOut}, isCoinbase={firstPreviousTransaction.IsCoinBase}");
-            //}
+            async Task FindOriginatorCoinbaseTransaction()
+            {
+                OutPoint firstPreviousOutPoint = transaction.Inputs.First().PrevOut;
+                var firstPreviousTransactionResponse = await client.GetTransaction(firstPreviousOutPoint.Hash);
+                var firstPreviousTransaction = firstPreviousTransactionResponse.Transaction;
+                var iteration = 0;
+                Console.WriteLine($"{iteration}: total out={firstPreviousTransaction.TotalOut}, isCoinbase={firstPreviousTransaction.IsCoinBase}");
+                while (!firstPreviousTransaction.IsCoinBase)
+                {
+                    firstPreviousTransactionResponse = await client.GetTransaction(firstPreviousTransaction.Inputs.First().PrevOut.Hash);
+                    firstPreviousTransaction = firstPreviousTransactionResponse.Transaction;
+                    Console.WriteLine($"{++iteration}: total out={firstPreviousTransaction.TotalOut}, isCoinbase={firstPreviousTransaction.IsCoinBase}");
+                }
+            }
+
+            //await FindOriginatorCoinbaseTransaction();
 
             Money spentAmount = Money.Zero;
             foreach (var spentCoin in spentCoins)
@@ -201,7 +206,7 @@ namespace BitcoinSample
             // primary testnet address: https://testnet.blockexplorer.com/address/mtjeFt6dMKqvQmYKcBAkSX9AmX8qdynVKN
             // with corresponding secret key cVX7SpYc8yjNW8WzPpiGTqyWD4eM4BBnfqEm9nwGqJb2QiX9hhdf
 
-            // obtain transaction info via QBitNinjaClient
+            // obtain trn info via QBitNinjaClient
             var client = new QBitNinjaClient(network);
             var transactionId = uint256.Parse("8a00a2afd5109b868a97ef82f51472c0abf040863245cde1426c5da24eb1a35b");
             var transactionResponse = await client.GetTransaction(transactionId);
@@ -221,7 +226,7 @@ namespace BitcoinSample
                 throw new Exception("TxOut doesn't contain our ScriptPubKey");
             Console.WriteLine($"We wanted to spend outpoint outPointToSpend.N + 1: {outPointToSpend.N + 1}.");
 
-            // the main sample: create a transaction and broadcast it!
+            // the main sample: create a trn and broadcast it!
             var transaction = Transaction.Create(network);
 
             string srcAddr = "mtrQCDZenXXa1oWMhypzgvBinfrZYYveRC";  //secondary
