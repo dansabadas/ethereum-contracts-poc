@@ -14,7 +14,7 @@ namespace BitcoinSample
         static async Task Main()
         {
             var privateKey = new Key(); // generate a random private key
-            BitcoinAddress(privateKey);
+            BitcoinAddresSamples(privateKey);
 
             PrivateKey(privateKey);
 
@@ -47,7 +47,7 @@ namespace BitcoinSample
             Console.WriteLine($"mainnet bitcoinSecret={bitcoinSecret}");
         }
 
-        private static void BitcoinAddress(Key privateKey)
+        private static void BitcoinAddresSamples(Key privateKey)
         {
             PubKey publicKey = privateKey.PubKey;
             Console.WriteLine($"publicKey={publicKey}");
@@ -194,7 +194,7 @@ namespace BitcoinSample
             // bitcoinPrivateKey=cT6DiZUoC61LqBsm5fTYW6BNkU9QwU4pJBdj84wmhi1daMECuneX
             // address=mtrQCDZenXXa1oWMhypzgvBinfrZYYveRC (the secondary testnet address)
 
-            bitcoinPrivateKey = new BitcoinSecret("cVX7SpYc8yjNW8WzPpiGTqyWD4eM4BBnfqEm9nwGqJb2QiX9hhdf");
+            bitcoinPrivateKey = new BitcoinSecret("cT6DiZUoC61LqBsm5fTYW6BNkU9QwU4pJBdj84wmhi1daMECuneX");
             network = bitcoinPrivateKey.Network;
             address = bitcoinPrivateKey.GetAddress();
 
@@ -203,12 +203,12 @@ namespace BitcoinSample
             Console.WriteLine($"network={network}");
 
             // get faucets from https://coinfaucet.eu/en/btc-testnet/
-            // primary testnet address: https://testnet.blockexplorer.com/address/mtjeFt6dMKqvQmYKcBAkSX9AmX8qdynVKN
+            // primary testnet address: https://live.blockcypher.com/btc-testnet/address/mtjeFt6dMKqvQmYKcBAkSX9AmX8qdynVKN/
             // with corresponding secret key cVX7SpYc8yjNW8WzPpiGTqyWD4eM4BBnfqEm9nwGqJb2QiX9hhdf
 
             // obtain trn info via QBitNinjaClient
             var client = new QBitNinjaClient(network);
-            var transactionId = uint256.Parse("8a00a2afd5109b868a97ef82f51472c0abf040863245cde1426c5da24eb1a35b");
+            var transactionId = uint256.Parse("a1cdc1a27dc3ff4cc77b40baec22e159c3203fec22f96fbda51233529ba46600");
             var transactionResponse = await client.GetTransaction(transactionId);
 
             Console.WriteLine($"tr-id: {transactionResponse.TransactionId} => confirmations={transactionResponse.Block.Confirmations}");
@@ -259,16 +259,39 @@ namespace BitcoinSample
                 ScriptPubKey = new BitcoinPubKeyAddress(srcAddr).ScriptPubKey
             };
 
-            transaction.Inputs.AddRange(await GetUnspentTransactions(destAddr));//destAddr srcAddr
+            var inputTranList = await GetUnspentTransactions(srcAddr);
+            transaction.Inputs.Add(inputTranList.First());   //destAddr srcAddr
             transaction.Outputs.Add(destinationFourThousandthsTxOut);
             transaction.Outputs.Add(changeBackTxOut);
-
-            var msgBytes = Encoding.UTF8.GetBytes("Long live NBitcoin and Danson!");
             transaction.Outputs.Add(new TxOut
             {
                 Value = Money.Zero,
-                ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(msgBytes)
+                ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(Encoding.UTF8.GetBytes("Long live NBitcoin and Danson!"))
             });
+
+            //signing
+            // Get it from the public address
+            transaction.Inputs[0].ScriptSig = BitcoinAddress
+                .Create(srcAddr, Network.TestNet)
+                .ScriptPubKey;
+            // OR we can also use the private key 
+            transaction.Inputs.ForEach(input => input.ScriptSig = bitcoinPrivateKey.ScriptPubKey);
+            Console.WriteLine($"transaction: {transaction}");
+
+            transaction.Sign(bitcoinPrivateKey, transactionResponse.ReceivedCoins.ToArray());
+
+            BroadcastResponse broadcastResponse = await client.Broadcast(transaction);
+
+            if (!broadcastResponse.Success)
+            {
+                Console.Error.WriteLine("ErrorCode: " + broadcastResponse.Error.ErrorCode);
+                Console.Error.WriteLine("Error message: " + broadcastResponse.Error.Reason);
+            }
+            else
+            {
+                Console.WriteLine("Success! You can check out the hash of the transaction in any block explorer:");
+                Console.WriteLine(transaction.GetHash());
+            }
         }
 
         static async Task<decimal> GetUnspentBalance(string publicAddress)
@@ -294,11 +317,11 @@ namespace BitcoinSample
             var client = new QBitNinjaClient(network);
             var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress), unspentOnly: true);
 
-            var unspentCoinsTransactions = new List<TxIn>();
-            foreach (var operation in balanceModel.Operations)
-            {
-                unspentCoinsTransactions.AddRange(operation.ReceivedCoins.Select(coin => new TxIn(coin.Outpoint)));
-            }
+            List<TxIn> unspentCoinsTransactions = balanceModel
+                .Operations
+                .SelectMany(operation => operation.ReceivedCoins)
+                .Select(coin => new TxIn { PrevOut = coin.Outpoint })
+                .ToList();
 
             return unspentCoinsTransactions;
         }
