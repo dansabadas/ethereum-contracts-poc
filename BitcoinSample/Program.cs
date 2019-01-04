@@ -260,7 +260,7 @@ namespace BitcoinSample
             };
 
             var inputTranList = await GetUnspentTransactions(srcAddr);
-            transaction.Inputs.Add(inputTranList.First());   //destAddr srcAddr
+            transaction.Inputs.Add(inputTranList[1]);   //destAddr srcAddr
             transaction.Outputs.Add(destinationFourThousandthsTxOut);
             transaction.Outputs.Add(changeBackTxOut);
             transaction.Outputs.Add(new TxOut
@@ -274,7 +274,7 @@ namespace BitcoinSample
             transaction.Inputs[0].ScriptSig = BitcoinAddress
                 .Create(srcAddr, Network.TestNet)
                 .ScriptPubKey;
-            // OR we can also use the private key 
+            // OR we can also use the private key
             transaction.Inputs.ForEach(input => input.ScriptSig = bitcoinPrivateKey.ScriptPubKey);
             Console.WriteLine($"transaction: {transaction}");
 
@@ -298,7 +298,7 @@ namespace BitcoinSample
         {
             var network = Network.TestNet;
             var client = new QBitNinjaClient(network);
-            var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress), unspentOnly: true);
+            var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress));
 
             var unspentCoins = new List<Coin>();
             foreach (var operation in balanceModel.Operations)
@@ -315,7 +315,7 @@ namespace BitcoinSample
         {
             var network = Network.TestNet;
             var client = new QBitNinjaClient(network);
-            var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress), unspentOnly: true);
+            var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress));
 
             List<TxIn> unspentCoinsTransactions = balanceModel
                 .Operations
