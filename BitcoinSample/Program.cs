@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using NBitcoin;
-using NBitcoin.Protocol;
+using Newtonsoft.Json.Linq;
 using QBitNinja.Client;
 using QBitNinja.Client.Models;
 
@@ -178,6 +179,14 @@ namespace BitcoinSample
 
             var fee = transactionResponse.Transaction.GetFee(spentCoins.ToArray());
             Console.WriteLine($"fee={fee}");
+
+            // 7ed5cdde4b00520c59a9ec8e77e49177660669a7365af4cfb0aa3eecdd2331bd 187d345f355f13978d3cc9969ca7e78dc8f253d702931e3b999bdc12e64536da
+            var trnId = "7ed5cdde4b00520c59a9ec8e77e49177660669a7365af4cfb0aa3eecdd2331bd";
+            await ObtainQBitNinjaTransactionInfo(trnId);
+            var customMessage = await ObtainBitcoinTransactionCustomMessage(trnId);
+
+            // obtain trn info via QBitNinjaClient
+            Console.WriteLine($"trnId={trnId} => customMessage={(string)customMessage}");
         }
 
         private static async Task SpendCoins()
@@ -208,28 +217,33 @@ namespace BitcoinSample
             // primary testnet address: https://live.blockcypher.com/btc-testnet/address/mtjeFt6dMKqvQmYKcBAkSX9AmX8qdynVKN/
             // with corresponding secret key cVX7SpYc8yjNW8WzPpiGTqyWD4eM4BBnfqEm9nwGqJb2QiX9hhdf
 
-            // obtain trn info via QBitNinjaClient
-            var client = await ObtainTransactionInfo(network);
-
             // the main sample: create a trn and broadcast it!
             var transaction = Transaction.Create(network);
 
             string srcAddr = "mtrQCDZenXXa1oWMhypzgvBinfrZYYveRC";  //secondary
             string destAddr = "mtjeFt6dMKqvQmYKcBAkSX9AmX8qdynVKN"; //primary
+            //var inputTranList = await GetUnspentTransactions(srcAddr);
+            //transaction.Inputs.Add(inputTranList[1]);   //destAddr srcAddr
+            Money amountToSpend = new Money(.004m, MoneyUnit.BTC);
+            var minerFee = new Money(0.000007m, MoneyUnit.BTC);
+            var trnId = await GetLatestSpentTransactionId(srcAddr);
+            var customMessage = await ObtainBitcoinTransactionCustomMessage(trnId.ToString());
 
-            decimal amountToSpend = .004m;
-            TxOut destinationFourThousandthsTxOut = new TxOut
-            {
-                Value = new Money(amountToSpend, MoneyUnit.BTC),
-                ScriptPubKey = new BitcoinPubKeyAddress(destAddr).ScriptPubKey
-            };
+            transaction.Inputs.Add(await GetSpendableTransaction(srcAddr, amountToSpend + minerFee));  // we find a pre-existing input with an amount bigger than the desired spending
+
+            TxOut destinationFourThousandthsTxOut = customMessage.N % 2 == 1 
+                ? new TxOut
+                    {
+                        Value = amountToSpend,
+                        ScriptPubKey = new BitcoinPubKeyAddress(destAddr).ScriptPubKey
+                    } 
+                : null; // every two transactions we just burn the money for the message fee only
             var unspentReceivedCoins = await GetUnspentBalance(srcAddr, amountToSpend);
             decimal srcAddrBalance = unspentReceivedCoins?.Amount.ToDecimal(MoneyUnit.BTC) ?? 0;
             Console.WriteLine($"unspentCoins={srcAddrBalance}");
 
-            var minerFee = new Money(0.000007m, MoneyUnit.BTC);
             var changeBackAmount = srcAddrBalance 
-                                   - destinationFourThousandthsTxOut.Value.ToDecimal(MoneyUnit.BTC) 
+                                   - (destinationFourThousandthsTxOut?.Value.ToDecimal(MoneyUnit.BTC) ?? 0m)
                                    - minerFee.ToDecimal(MoneyUnit.BTC);
 
             TxOut changeBackTxOut = new TxOut
@@ -238,16 +252,25 @@ namespace BitcoinSample
                 ScriptPubKey = new BitcoinPubKeyAddress(srcAddr).ScriptPubKey
             };
 
-            //var inputTranList = await GetUnspentTransactions(srcAddr);
-            //transaction.Inputs.Add(inputTranList[1]);   //destAddr srcAddr
-            transaction.Inputs.Add(await GetSpendableTransaction(srcAddr, amountToSpend));
+            if (destinationFourThousandthsTxOut != null)
+            {
+                transaction.Outputs.Add(destinationFourThousandthsTxOut);
+            }
 
-            transaction.Outputs.Add(destinationFourThousandthsTxOut);
             transaction.Outputs.Add(changeBackTxOut);
+
+            TranslationContract tc = new TranslationContract
+            {
+                E = "dan.sabadas@gmail.com",
+                N = customMessage.N + 1,    // we increase the number of translated words of the latest contract! :)
+                S = "ro",
+                D = new[] {"en", "fr"}
+            };
+            string serializedMsg = (string)tc;
             transaction.Outputs.Add(new TxOut
             {
                 Value = Money.Zero,
-                ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(Encoding.UTF8.GetBytes("Long live NBitcoin and Danson!"))
+                ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(Encoding.UTF8.GetBytes(serializedMsg))
             });
 
             //signing
@@ -261,6 +284,7 @@ namespace BitcoinSample
 
             transaction.Sign(bitcoinPrivateKey, new [] {unspentReceivedCoins});
 
+            var client = new QBitNinjaClient(network);
             BroadcastResponse broadcastResponse = await client.Broadcast(transaction);
 
             if (!broadcastResponse.Success)
@@ -275,14 +299,13 @@ namespace BitcoinSample
             }
         }
 
-        private static async Task<QBitNinjaClient> ObtainTransactionInfo(Network network)
+        private static async Task ObtainQBitNinjaTransactionInfo(string transactionId)
         {
-            var client = new QBitNinjaClient(network);
-            var transactionId = uint256.Parse("4e87d3401556284a8727b11dad83568106fabed836f8e98bff85916d94c741bc");
-            var transactionResponse = await client.GetTransaction(transactionId);
+            var client = new QBitNinjaClient(Network.TestNet);
 
+            var transactionResponse = await client.GetTransaction(uint256.Parse(transactionId));
             Console.WriteLine(
-                $"tr-id: {transactionResponse.TransactionId} => confirmations={transactionResponse.Block.Confirmations}");
+                $"tr-id: {transactionResponse.TransactionId} => confirmations={transactionResponse.Block?.Confirmations ?? 0}");
 
             var bitcoinPrivateKey = new BitcoinSecret("cT6DiZUoC61LqBsm5fTYW6BNkU9QwU4pJBdj84wmhi1daMECuneX");
 
@@ -298,7 +321,32 @@ namespace BitcoinSample
             if (outPointToSpend == null)
                 throw new Exception("TxOut doesn't contain our ScriptPubKey");
             Console.WriteLine($"We wanted to spend outpoint outPointToSpend.N + 1: {outPointToSpend.N + 1}.");
-            return client;
+        }
+
+        private static async Task<TranslationContract> ObtainBitcoinTransactionCustomMessage(string transactionId)
+        {
+            var url = $"https://api.blockcypher.com/v1/btc/test3/txs/{transactionId}";
+            var request = WebRequest.Create(url);
+            string text;
+
+            var response = (HttpWebResponse) await request.GetResponseAsync(); //request.GetResponse()
+
+            using (var sr = new StreamReader(response.GetResponseStream()))
+            {
+                text = sr.ReadToEnd();
+            }
+
+            dynamic json = JObject.Parse(text);
+            JArray outputs = json.outputs;
+            var message = outputs.Where(output =>
+                {
+                    dynamic dynOutput = output; // we return only the tx-out element with type null-data that has a custom string message
+                    return dynOutput.script_type == "null-data" && !string.IsNullOrEmpty((string) dynOutput.data_string);
+                })
+                .Select(output => (string)((dynamic)output).data_string)
+                .FirstOrDefault();
+
+            return message;
         }
 
         static async Task<decimal> GetUnspentBalance(string publicAddress)
@@ -318,7 +366,7 @@ namespace BitcoinSample
             return balance;
         }
 
-        static async Task<Coin> GetUnspentBalance(string publicAddress, decimal amount)
+        static async Task<Coin> GetUnspentBalance(string publicAddress, Money amount)
         {
             var network = Network.TestNet;
             var client = new QBitNinjaClient(network);
@@ -327,12 +375,12 @@ namespace BitcoinSample
             var unspentReceivedCoins = (Coin)balanceModel
                 .Operations
                 .SelectMany(operation => operation.ReceivedCoins)
-                .FirstOrDefault(c => c is Coin coin && coin.Amount.ToDecimal(MoneyUnit.BTC) > amount);
+                .FirstOrDefault(c => c is Coin coin && coin.Amount > amount);
 
             return unspentReceivedCoins;
         }
 
-        static async Task<TxIn> GetSpendableTransaction(string publicAddress, decimal amount)
+        static async Task<TxIn> GetSpendableTransaction(string publicAddress, Money amount)
         {
             var network = Network.TestNet;
             var client = new QBitNinjaClient(network);
@@ -341,11 +389,26 @@ namespace BitcoinSample
             List<TxIn> unspentCoinsTransactions = balanceModel
                 .Operations
                 .SelectMany(operation => operation.ReceivedCoins)
-                .Where(c => c is Coin coin && coin.Amount.ToDecimal(MoneyUnit.BTC) > amount)
+                .Where(c => c is Coin coin && coin.Amount > amount)
                 .Select(coin => new TxIn { PrevOut = coin.Outpoint })
                 .ToList();
 
             return unspentCoinsTransactions.FirstOrDefault();
+        }
+
+        static async Task<uint256> GetLatestSpentTransactionId(string publicAddress)
+        {
+            var network = Network.TestNet;
+            var client = new QBitNinjaClient(network);
+            var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress));
+
+            var operation = balanceModel
+                .Operations
+                .Where(op => op.Amount < 0)
+                .OrderByDescending(op => op.Height)
+                .First();
+
+            return operation.TransactionId;
         }
 
         static async Task<List<TxIn>> GetUnspentTransactions(string publicAddress)
