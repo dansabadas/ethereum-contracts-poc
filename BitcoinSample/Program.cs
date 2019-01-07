@@ -2,8 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using NBitcoin;
+using NBitcoin.Protocol;
 using QBitNinja.Client;
 using QBitNinja.Client.Models;
 
@@ -207,24 +209,7 @@ namespace BitcoinSample
             // with corresponding secret key cVX7SpYc8yjNW8WzPpiGTqyWD4eM4BBnfqEm9nwGqJb2QiX9hhdf
 
             // obtain trn info via QBitNinjaClient
-            var client = new QBitNinjaClient(network);
-            var transactionId = uint256.Parse("a1cdc1a27dc3ff4cc77b40baec22e159c3203fec22f96fbda51233529ba46600");
-            var transactionResponse = await client.GetTransaction(transactionId);
-
-            Console.WriteLine($"tr-id: {transactionResponse.TransactionId} => confirmations={transactionResponse.Block.Confirmations}");
-
-            OutPoint outPointToSpend = null;
-            foreach (var receivedCoin in transactionResponse.ReceivedCoins)
-            {
-                if (receivedCoin.TxOut.ScriptPubKey == bitcoinPrivateKey.ScriptPubKey)
-                {
-                    outPointToSpend = receivedCoin.Outpoint;
-                }
-            }
-
-            if (outPointToSpend == null)
-                throw new Exception("TxOut doesn't contain our ScriptPubKey");
-            Console.WriteLine($"We wanted to spend outpoint outPointToSpend.N + 1: {outPointToSpend.N + 1}.");
+            var client = await ObtainTransactionInfo(network);
 
             // the main sample: create a trn and broadcast it!
             var transaction = Transaction.Create(network);
@@ -232,20 +217,14 @@ namespace BitcoinSample
             string srcAddr = "mtrQCDZenXXa1oWMhypzgvBinfrZYYveRC";  //secondary
             string destAddr = "mtjeFt6dMKqvQmYKcBAkSX9AmX8qdynVKN"; //primary
 
+            decimal amountToSpend = .004m;
             TxOut destinationFourThousandthsTxOut = new TxOut
             {
-                Value = new Money(0.004m, MoneyUnit.BTC),
+                Value = new Money(amountToSpend, MoneyUnit.BTC),
                 ScriptPubKey = new BitcoinPubKeyAddress(destAddr).ScriptPubKey
             };
-            decimal srcAddrBalance = 0;
-            try
-            {
-                srcAddrBalance = await GetUnspentBalance(srcAddr);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message);
-            }
+            var unspentReceivedCoins = await GetUnspentBalance(srcAddr, amountToSpend);
+            decimal srcAddrBalance = unspentReceivedCoins?.Amount.ToDecimal(MoneyUnit.BTC) ?? 0;
             Console.WriteLine($"unspentCoins={srcAddrBalance}");
 
             var minerFee = new Money(0.000007m, MoneyUnit.BTC);
@@ -259,8 +238,10 @@ namespace BitcoinSample
                 ScriptPubKey = new BitcoinPubKeyAddress(srcAddr).ScriptPubKey
             };
 
-            var inputTranList = await GetUnspentTransactions(srcAddr);
-            transaction.Inputs.Add(inputTranList[1]);   //destAddr srcAddr
+            //var inputTranList = await GetUnspentTransactions(srcAddr);
+            //transaction.Inputs.Add(inputTranList[1]);   //destAddr srcAddr
+            transaction.Inputs.Add(await GetSpendableTransaction(srcAddr, amountToSpend));
+
             transaction.Outputs.Add(destinationFourThousandthsTxOut);
             transaction.Outputs.Add(changeBackTxOut);
             transaction.Outputs.Add(new TxOut
@@ -274,11 +255,11 @@ namespace BitcoinSample
             transaction.Inputs[0].ScriptSig = BitcoinAddress
                 .Create(srcAddr, Network.TestNet)
                 .ScriptPubKey;
-            // OR we can also use the private key
+            // OR we can also use the private key 
             transaction.Inputs.ForEach(input => input.ScriptSig = bitcoinPrivateKey.ScriptPubKey);
             Console.WriteLine($"transaction: {transaction}");
 
-            transaction.Sign(bitcoinPrivateKey, transactionResponse.ReceivedCoins.ToArray());
+            transaction.Sign(bitcoinPrivateKey, new [] {unspentReceivedCoins});
 
             BroadcastResponse broadcastResponse = await client.Broadcast(transaction);
 
@@ -292,6 +273,32 @@ namespace BitcoinSample
                 Console.WriteLine("Success! You can check out the hash of the transaction in any block explorer:");
                 Console.WriteLine(transaction.GetHash());
             }
+        }
+
+        private static async Task<QBitNinjaClient> ObtainTransactionInfo(Network network)
+        {
+            var client = new QBitNinjaClient(network);
+            var transactionId = uint256.Parse("4e87d3401556284a8727b11dad83568106fabed836f8e98bff85916d94c741bc");
+            var transactionResponse = await client.GetTransaction(transactionId);
+
+            Console.WriteLine(
+                $"tr-id: {transactionResponse.TransactionId} => confirmations={transactionResponse.Block.Confirmations}");
+
+            var bitcoinPrivateKey = new BitcoinSecret("cT6DiZUoC61LqBsm5fTYW6BNkU9QwU4pJBdj84wmhi1daMECuneX");
+
+            OutPoint outPointToSpend = null;
+            foreach (var receivedCoin in transactionResponse.ReceivedCoins)
+            {
+                if (receivedCoin.TxOut.ScriptPubKey == bitcoinPrivateKey.ScriptPubKey)
+                {
+                    outPointToSpend = receivedCoin.Outpoint;
+                }
+            }
+
+            if (outPointToSpend == null)
+                throw new Exception("TxOut doesn't contain our ScriptPubKey");
+            Console.WriteLine($"We wanted to spend outpoint outPointToSpend.N + 1: {outPointToSpend.N + 1}.");
+            return client;
         }
 
         static async Task<decimal> GetUnspentBalance(string publicAddress)
@@ -309,6 +316,36 @@ namespace BitcoinSample
             var balance = unspentCoins.Sum(x => x.Amount.ToDecimal(MoneyUnit.BTC));
 
             return balance;
+        }
+
+        static async Task<Coin> GetUnspentBalance(string publicAddress, decimal amount)
+        {
+            var network = Network.TestNet;
+            var client = new QBitNinjaClient(network);
+            var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress), unspentOnly: true);
+
+            var unspentReceivedCoins = (Coin)balanceModel
+                .Operations
+                .SelectMany(operation => operation.ReceivedCoins)
+                .FirstOrDefault(c => c is Coin coin && coin.Amount.ToDecimal(MoneyUnit.BTC) > amount);
+
+            return unspentReceivedCoins;
+        }
+
+        static async Task<TxIn> GetSpendableTransaction(string publicAddress, decimal amount)
+        {
+            var network = Network.TestNet;
+            var client = new QBitNinjaClient(network);
+            var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress), unspentOnly: true);
+
+            List<TxIn> unspentCoinsTransactions = balanceModel
+                .Operations
+                .SelectMany(operation => operation.ReceivedCoins)
+                .Where(c => c is Coin coin && coin.Amount.ToDecimal(MoneyUnit.BTC) > amount)
+                .Select(coin => new TxIn { PrevOut = coin.Outpoint })
+                .ToList();
+
+            return unspentCoinsTransactions.FirstOrDefault();
         }
 
         static async Task<List<TxIn>> GetUnspentTransactions(string publicAddress)
