@@ -181,7 +181,7 @@ namespace BitcoinSample
             Console.WriteLine($"fee={fee}");
 
             // 7ed5cdde4b00520c59a9ec8e77e49177660669a7365af4cfb0aa3eecdd2331bd 187d345f355f13978d3cc9969ca7e78dc8f253d702931e3b999bdc12e64536da
-            var trnId = "7ed5cdde4b00520c59a9ec8e77e49177660669a7365af4cfb0aa3eecdd2331bd";
+            var trnId = "81e656ca6492855ebd7c3b0a873167aea375765f350113ca738b389601df2c99";
             await ObtainQBitNinjaTransactionInfo(trnId);
             var customMessage = await ObtainBitcoinTransactionCustomMessage(trnId);
 
@@ -228,10 +228,10 @@ namespace BitcoinSample
             var minerFee = new Money(0.000007m, MoneyUnit.BTC);
             var trnId = await GetLatestSpentTransactionId(srcAddr);
             var customMessage = await ObtainBitcoinTransactionCustomMessage(trnId.ToString());
+            var (txIn, coin) = await GetSpendableTransaction(srcAddr, amountToSpend + minerFee);
+            transaction.Inputs.Add(txIn);  // we find a pre-existing input with an amount bigger than the desired spending
 
-            transaction.Inputs.Add(await GetSpendableTransaction(srcAddr, amountToSpend + minerFee));  // we find a pre-existing input with an amount bigger than the desired spending
-
-            TxOut destinationFourThousandthsTxOut = customMessage.N % 2 == 1 
+            TxOut destinationFourThousandthsTxOut = customMessage.NumberOfWords % 2 == 1 
                 ? new TxOut
                     {
                         Value = amountToSpend,
@@ -242,36 +242,37 @@ namespace BitcoinSample
             decimal srcAddrBalance = unspentReceivedCoins?.Amount.ToDecimal(MoneyUnit.BTC) ?? 0;
             Console.WriteLine($"unspentCoins={srcAddrBalance}");
 
-            var changeBackAmount = srcAddrBalance 
+            if (destinationFourThousandthsTxOut != null)
+            {
+                transaction.Outputs.Add(destinationFourThousandthsTxOut);
+            }
+
+            TranslationContract tc = new TranslationContract
+            {
+                Email = "dan.sabadas@gmail.com",
+                NumberOfWords = customMessage.NumberOfWords + 1,    // we increase the number of translated words of the latest contract! :)
+                Source = "ro",
+                Destinations = new[] {"en", "fr"}
+            };
+            string serializedMsg = (string)tc;
+            byte[] serializedBytesMsg = Encoding.UTF8.GetBytes(serializedMsg);
+            var messageTransaction = new TxOut
+            {
+                Value = customMessage.NumberOfWords % 3 == 1 ? minerFee : Money.Zero,
+                ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(serializedBytesMsg)
+            };
+            transaction.Outputs.Add(messageTransaction);
+
+            var changeBackAmount = srcAddrBalance
                                    - (destinationFourThousandthsTxOut?.Value.ToDecimal(MoneyUnit.BTC) ?? 0m)
-                                   - minerFee.ToDecimal(MoneyUnit.BTC);
+                                   - (messageTransaction.Value != Money.Zero ? 2*minerFee.ToDecimal(MoneyUnit.BTC) : minerFee.ToDecimal(MoneyUnit.BTC));
 
             TxOut changeBackTxOut = new TxOut
             {
                 Value = new Money(changeBackAmount, MoneyUnit.BTC),
                 ScriptPubKey = new BitcoinPubKeyAddress(srcAddr).ScriptPubKey
             };
-
-            if (destinationFourThousandthsTxOut != null)
-            {
-                transaction.Outputs.Add(destinationFourThousandthsTxOut);
-            }
-
             transaction.Outputs.Add(changeBackTxOut);
-
-            TranslationContract tc = new TranslationContract
-            {
-                E = "dan.sabadas@gmail.com",
-                N = customMessage.N + 1,    // we increase the number of translated words of the latest contract! :)
-                S = "ro",
-                D = new[] {"en", "fr"}
-            };
-            string serializedMsg = (string)tc;
-            transaction.Outputs.Add(new TxOut
-            {
-                Value = Money.Zero,
-                ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(Encoding.UTF8.GetBytes(serializedMsg))
-            });
 
             //signing
             // Get it from the public address
@@ -280,10 +281,11 @@ namespace BitcoinSample
                 .ScriptPubKey;
             // OR we can also use the private key 
             transaction.Inputs.ForEach(input => input.ScriptSig = bitcoinPrivateKey.ScriptPubKey);
-            Console.WriteLine($"transaction: {transaction}");
+            Console.WriteLine($"before signing transaction: {transaction}");
 
             transaction.Sign(bitcoinPrivateKey, new [] {unspentReceivedCoins});
 
+            Console.WriteLine($"after signing transaction: {transaction}");
             var client = new QBitNinjaClient(network);
             BroadcastResponse broadcastResponse = await client.Broadcast(transaction);
 
@@ -380,17 +382,17 @@ namespace BitcoinSample
             return unspentReceivedCoins;
         }
 
-        static async Task<TxIn> GetSpendableTransaction(string publicAddress, Money amount)
+        static async Task<Tuple<TxIn, Coin>> GetSpendableTransaction(string publicAddress, Money amount)
         {
             var network = Network.TestNet;
             var client = new QBitNinjaClient(network);
             var balanceModel = await client.GetBalance(new BitcoinPubKeyAddress(publicAddress), unspentOnly: true);
 
-            List<TxIn> unspentCoinsTransactions = balanceModel
+            var unspentCoinsTransactions = balanceModel
                 .Operations
                 .SelectMany(operation => operation.ReceivedCoins)
                 .Where(c => c is Coin coin && coin.Amount > amount)
-                .Select(coin => new TxIn { PrevOut = coin.Outpoint })
+                .Select(coin => Tuple.Create(new TxIn { PrevOut = coin.Outpoint }, coin as Coin))
                 .ToList();
 
             return unspentCoinsTransactions.FirstOrDefault();

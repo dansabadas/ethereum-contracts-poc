@@ -1,29 +1,37 @@
 ﻿using System.Linq;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace BitcoinSample
 {
+    /// <summary>
+    /// Extremely
+    /// </summary>
     public class TranslationContract
     {
         /// <summary>
         /// Represents the email address of the translation/contractor
         /// </summary>
-        public string E { get; set; }
+        [JsonProperty(PropertyName = "e")]
+        public string Email { get; set; }
 
         /// <summary>
         /// Represents the number of words translated for a given project
         /// </summary>
-        public int N { get; set; }
+        [JsonProperty(PropertyName = "n")]
+        public int NumberOfWords { get; set; }
 
         /// <summary>
         /// Represents the Source Language (to be translated)
         /// </summary>
-        public string S { get; set; }
+        [JsonProperty(PropertyName = "s")]
+        public string Source { get; set; }
 
         /// <summary>
         /// Represents the Destination Languages (that were translated)
         /// </summary>
-        public string[] D { get; set; }
+        [JsonProperty(PropertyName = "d")]
+        public string[] Destinations { get; set; }
 
         public static explicit operator string(TranslationContract c)
         {
@@ -35,13 +43,13 @@ namespace BitcoinSample
         {
             string curatedJsonString = serializedJson.Replace(@"&#34;", "\"");
             JObject jObj = JObject.Parse(curatedJsonString);
-            JArray destinationLanguagesArr = (JArray)jObj["D"];
+            JArray destinationLanguagesArr = (JArray)jObj["d"];
             var contract = new TranslationContract
             {
-                E = (string)jObj["E"],
-                N = (int)jObj["N"],
-                S = (string)jObj["S"],
-                D = destinationLanguagesArr.Select(destLang => (string)destLang).ToArray()
+                Email = (string)jObj["e"],
+                NumberOfWords = (int)jObj["n"],
+                Source = (string)jObj["s"],
+                Destinations = destinationLanguagesArr.Select(destLang => (string)destLang).ToArray()
             };
 
             return contract;
